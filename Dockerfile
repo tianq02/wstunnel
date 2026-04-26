@@ -1,40 +1,44 @@
-# ccr.ccs.tencentyun.com/tianq/wstunnel:v10.5.2.fix
-
 ARG BUILDER_IMAGE=builder_cache
 
 ############################################################
 # Cache image with all the deps
 FROM docker.1ms.run/library/rust:1.93-trixie AS builder_cache
 
+RUN <<'MIRROR_SETUP'
+
+sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
+
+cat >> ~/.bashrc << 'BASH'
+export RUSTUP_DIST_SERVER="https://rsproxy.cn"
+export RUSTUP_UPDATE_ROOT="https://rsproxy.cn/rustup"
+BASH
+
+mkdir -vp ${CARGO_HOME:-$HOME/.cargo}
+
+cat >> ${CARGO_HOME:-$HOME/.cargo}/config.toml << 'CARGO'
+[source.crates-io]
+replace-with = 'rsproxy-sparse'
+[source.rsproxy]
+registry = "https://rsproxy.cn/crates.io-index"
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+[registries.rsproxy]
+index = "https://rsproxy.cn/crates.io-index"
+[net]
+git-fetch-with-cli = true
+CARGO
+
+MIRROR_SETUP
+
 RUN rustup component add rustfmt clippy && apt-get update && apt-get install cmake libclang-dev -y
 
 WORKDIR /build
 COPY . ./
 
-# setup rust mirror
-RUN <<EOF
-    echo 'export RUSTUP_DIST_SERVER="https://rsproxy.cn"' >> ~/.bashrc
-    echo 'export RUSTUP_UPDATE_ROOT="https://rsproxy.cn/rustup"' >> ~/.bashrc
-    mkdir -p ~/.cargo
-    cat > ~/.cargo/config <<'CONFIG'
-[source.crates-io]
-replace-with = "rsproxy-sparse"
-
-[source.rsproxy]
-registry = "https://rsproxy.cn/crates.io-index"
-
-[source.rsproxy-sparse]
-registry = "sparse+https://rsproxy.cn/index/"
-
-[registries.rsproxy]
-index = "https://rsproxy.cn/crates.io-index"
-
-[net]
-git-fetch-with-cli = true
-CONFIG
-EOF
 
 RUN cargo fmt --all -- --check --color=always || (echo "Use cargo fmt to format your code"; exit 1)
+
+# As of 27APR2025, clippy found some deprecated code and stops docker build, we have to skip it for now
 #RUN cargo clippy --all -- -D warnings || (echo "Solve your clippy warnings to succeed"; exit 1)
 
 #RUN cargo test --all --all-features
